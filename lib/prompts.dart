@@ -1,4 +1,5 @@
 import 'dart:io';
+
 import 'package:charcode/ascii.dart';
 import 'package:io/ansi.dart';
 
@@ -433,6 +434,120 @@ T? choose<T>(String message, Iterable<T> options,
     if (i != null) return map.keys.elementAt(i - 1);
     return map.keys.elementAt(map.values.toList(growable: false).indexOf(line));
   }
+}
+
+/// Prompt the user to select multiple options.
+List<T> multiChoose<T>(
+  String message,
+  List<T> options, {
+  String prompt =
+      'Select options (press [space] to toggle, [enter] to confirm)',
+  AnsiCode selectedColor = cyan,
+  bool color = true,
+  Iterable<String>? names,
+  Set<T> defaultSelected = const {},
+}) {
+  if (options.isEmpty) throw ArgumentError('Options cannot be empty.');
+  if (names != null && names.length != options.length) {
+    throw ArgumentError('names must match options length.');
+  }
+
+  var selected = List<bool>.filled(options.length, false);
+  if (defaultSelected.isNotEmpty) {
+    for (var i = 0; i < options.length; i++) {
+      if (defaultSelected.contains(options[i])) {
+        selected[i] = true;
+      }
+    }
+  }
+  var index = 0;
+
+  stdout.writeln('\n$message\n');
+
+  void render() {
+    for (var i = 0; i < options.length; i++) {
+      var prefix = selected[i] ? '[✔]' : '[ ]';
+      var text = '$prefix ${options[i]}';
+
+      if (i == index) {
+        if (color) {
+          stdout.writeln(selectedColor.wrap('> $text'));
+        } else {
+          stdout.writeln('> $text');
+        }
+      } else {
+        stdout.writeln('  $text');
+      }
+    }
+  }
+
+  if (ansiOutputEnabled && !Platform.isWindows) {
+    var oldEchoMode = stdin.echoMode;
+    var oldLineMode = stdin.lineMode;
+
+    try {
+      stdin.echoMode = false;
+      stdin.lineMode = false;
+
+      render();
+
+      while (true) {
+        var ch = stdin.readByteSync();
+        if (ch == $esc) {
+          ch = stdin.readByteSync();
+          if (ch == $lbracket) {
+            ch = stdin.readByteSync();
+            if (ch == $A) {
+              // Up
+              index = (index - 1) % options.length;
+            } else if (ch == $B) {
+              // Down
+              index = (index + 1) % options.length;
+            }
+          }
+        } else if (ch == $space) {
+          selected[index] = !selected[index];
+        } else if (ch == $lf) {
+          // Enter key
+          break;
+        }
+
+        for (var i = 0; i < options.length; i++) {
+          goUpOneLine();
+          clearLine();
+        }
+
+        render();
+      }
+    } finally {
+      stdin.echoMode = oldEchoMode;
+      stdin.lineMode = oldLineMode;
+    }
+
+    stdout.writeln(); // for spacing
+  } else {
+    // Fallback: comma-separated
+    for (var i = 0; i < options.length; i++) {
+      stdout.writeln('${i + 1}) ${options[i]}');
+    }
+
+    var input = get(prompt);
+    var indexes = input
+        .split(',')
+        .map((e) => int.tryParse(e.trim()))
+        .where((e) => e != null && e > 0 && e <= options.length)
+        .map((e) => e! - 1)
+        .toList();
+
+    for (var i in indexes) {
+      selected[i] = true;
+    }
+  }
+
+  return [
+    for (var i = 0; i < options.length; i++)
+      if (selected[i]) options[i],
+  ];
 }
 
 /// Similar to [choose], but opts for a shorthand syntax that fits into one line,
